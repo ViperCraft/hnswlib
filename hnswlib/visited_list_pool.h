@@ -34,10 +34,10 @@ class VisitedList {
 // Class for multi-threaded pool-management of VisitedLists
 //
 /////////////////////////////////////////////////////////
-
+template<typename Mut = std::mutex>
 class VisitedListPool {
     std::deque<VisitedList *> pool;
-    std::mutex poolguard;
+    Mut poolguard;
     int numelements;
 
  public:
