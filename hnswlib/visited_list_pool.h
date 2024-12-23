@@ -50,7 +50,7 @@ class VisitedListPool {
     VisitedList *getFreeVisitedList() {
         VisitedList *rez;
         {
-            std::unique_lock <std::mutex> lock(poolguard);
+            std::unique_lock <Mut> lock(poolguard);
             if (pool.size() > 0) {
                 rez = pool.front();
                 pool.pop_front();
@@ -63,7 +63,7 @@ class VisitedListPool {
     }
 
     void releaseVisitedList(VisitedList *vl) {
-        std::unique_lock <std::mutex> lock(poolguard);
+        std::unique_lock <Mut> lock(poolguard);
         pool.push_front(vl);
     }
 
