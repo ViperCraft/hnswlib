@@ -2,11 +2,10 @@
 
 #include "visited_list_pool.h"
 #include "hnswlib.h"
-#include <random>
 #include <stdlib.h>
 #include <assert.h>
-#include <list>
 #include <memory>
+#include <stdint.h>
 #include "hnswalg.h"
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -84,6 +83,60 @@ public:
   }
 };
 
+constexpr size_t align_size( size_t sz, size_t block_siz )
+{
+    return (sz + block_siz - 1) & ~(block_siz - 1);
+}
+
+inline void* aligned_malloc( size_t sz, size_t alignment = 16 )
+{
+    void *out_bytes;
+    if( posix_memalign(&out_bytes, alignment, sz) )
+        throw std::bad_alloc();
+
+    return out_bytes;
+}
+
+class VisitedBitmap
+{
+public:
+    VisitedBitmap( size_t max_capacity )
+        : capacity_( align_size(max_capacity, 512) / 8 )
+        , bitmap_( static_cast<uint64_t*>(aligned_malloc(capacity_, 64)) )
+        {}
+
+    void clear()
+    {
+        memset(bitmap_, 0, capacity_);
+    }
+    
+    bool mark( uint32_t pos )
+    {
+        if( is_marked(pos) )
+        {
+            return false;
+        }
+        uint32_t addr = pos / 64;
+        bitmap_[addr] |= 1UL << (pos % 64);
+        return true;
+    }
+
+    void set( uint32_t pos )
+    {
+        uint32_t addr = pos / 64;
+        bitmap_[addr] |= 1UL << (pos % 64);
+    }
+
+    bool is_marked( uint32_t pos ) const
+    {
+        uint64_t const w = bitmap_[ pos / 64 ];
+        return ((w >> (pos % 64)) & 1UL) == 1UL;
+    }
+private:
+    size_t              capacity_;
+    uint64_t            *bitmap_;
+};
+
 // reads filecontent directly from disk-cache w/o moving to the anon memory and allocation
 // reading and search only, so temporary structures for quick expand also omitted 
 // to get maximum speed, can be used with HierarchicalNSW class
@@ -108,8 +161,6 @@ public:
     ~HierarchicalNSWFastReader() {
         free(linkLists_);
         linkLists_ = nullptr;
-        cur_element_count = 0;
-        visited_list_pool_.reset(nullptr);
 
         MMapImpl::unmap(mapping_);
     }
@@ -118,7 +169,7 @@ public:
     pq_result_t
     searchKnn(const void *query_data, size_t k, BaseFilterFunctor* isIdAllowed = nullptr) const {
         pq_result_t result;
-        if (cur_element_count == 0) return result;
+        if (max_elements_ == 0) return result;
 
         tableint currObj = enterpoint_node_;
         dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
@@ -135,8 +186,8 @@ public:
                 tableint *datal = (tableint *) (data + 1);
                 for (int i = 0; i < size; i++) {
                     tableint cand = datal[i];
-                    if (cand < 0 || cand > max_elements_)
-                        throw std::runtime_error("cand error");
+                    //if (cand < 0 || cand > max_elements_)
+                    //    throw std::runtime_error("cand error");
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 
                     if (d < curdist) {
@@ -157,7 +208,7 @@ public:
             top_candidates = searchBaseLayerST<false>(
                     currObj, query_data, std::max(ef_, k), isIdAllowed);
         }
-
+        
         while (top_candidates.size() > k) {
             top_candidates.pop();
         }
@@ -180,9 +231,10 @@ private:
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
-        vl_type *visited_array = vl->mass;
-        vl_type visited_array_tag = vl->curV;
+        //VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        //vl_type *visited_array = vl->mass;
+        //vl_type visited_array_tag = vl->curV;
+        visited_bitmap_->clear();
 
         pq_top_candidates_t top_candidates;
         pq_top_candidates_t candidate_set;
@@ -203,7 +255,8 @@ private:
             candidate_set.emplace(-lowerBound, ep_id);
         }
 
-        visited_array[ep_id] = visited_array_tag;
+        //visited_array[ep_id] = visited_array_tag;
+        visited_bitmap_->set(ep_id);
 
         while (!candidate_set.empty()) {
             std::pair<dist_t, tableint> current_node_pair = candidate_set.top();
@@ -229,8 +282,8 @@ private:
             size_t size = getListCount((linklistsizeint*)data);
 
 #ifdef USE_SSE
-            _mm_prefetch((char *) (visited_array + *(data + 1)), _MM_HINT_T0);
-            _mm_prefetch((char *) (visited_array + *(data + 1) + 64), _MM_HINT_T0);
+            //_mm_prefetch((char *) (visited_array + *(data + 1)), _MM_HINT_T0);
+            //_mm_prefetch((char *) (visited_array + *(data + 1) + 64), _MM_HINT_T0);
             _mm_prefetch(data_level0_memory_ + (*(data + 1)) * size_data_per_element_ + offsetData_, _MM_HINT_T0);
             _mm_prefetch((char *) (data + 2), _MM_HINT_T0);
 #endif
@@ -239,12 +292,13 @@ private:
                 int candidate_id = *(data + j);
 //                    if (candidate_id == 0) continue;
 #ifdef USE_SSE
-                _mm_prefetch((char *) (visited_array + *(data + j + 1)), _MM_HINT_T0);
+                //_mm_prefetch((char *) (visited_array + *(data + j + 1)), _MM_HINT_T0);
                 _mm_prefetch(data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_,
                                 _MM_HINT_T0);  ////////////
 #endif
-                if (!(visited_array[candidate_id] == visited_array_tag)) {
-                    visited_array[candidate_id] = visited_array_tag;
+                //if (!(visited_array[candidate_id] == visited_array_tag)) {
+                //    visited_array[candidate_id] = visited_array_tag;
+                if( visited_bitmap_->mark(candidate_id) ) {
 
                     char const *currObj1 = (getDataByInternalId(candidate_id));
                     dist_t dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -296,7 +350,7 @@ private:
             }
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
+        //visited_list_pool_->releaseVisitedList(vl);
         return top_candidates;
     }
 
@@ -305,6 +359,11 @@ private:
         mapping_ = MMapImpl::map(location.c_str(), false);
 
         size_t data_size_{0};
+        size_t M_{0};
+        size_t maxM0_{0};
+        size_t maxM_{0};
+        size_t ef_construction_{0};
+        size_t cur_element_count{0};  // current number of elements
         double mult_{0.0}, revSize_{0.0};
 
         size_t total_filesize = mapping_.size;
@@ -342,9 +401,10 @@ private:
 
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
-        size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
+        size_t size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
 
-        visited_list_pool_.reset(new VisitedListPool(1, max_elements));
+        //visited_list_pool_.reset(new VisitedListPool(1, max_elements));
+        visited_bitmap_.reset( new VisitedBitmap(max_elements) );
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
         if (linkLists_ == nullptr)
@@ -391,10 +451,6 @@ private:
         return max_elements_;
     }
 
-    size_t getCurrentElementCount() {
-        return cur_element_count;
-    }
-
     size_t getDeletedCount() {
         return num_deleted_;
     }
@@ -434,22 +490,14 @@ private:
     using mutex_t = typename NoMTSupport::mutex_type;
     using VisitedListPool = VisitedListPool<mutex_t>;
     size_t max_elements_{0};
-    size_t cur_element_count{0};  // current number of elements
     size_t size_data_per_element_{0};
     size_t size_links_per_element_{0};
     size_t num_deleted_{0};  // number of deleted elements
-    size_t M_{0};
-    size_t maxM_{0};
-    size_t maxM0_{0};
-    size_t ef_construction_{0};
     size_t ef_{ 0 };
-
-    std::unique_ptr<VisitedListPool> visited_list_pool_{nullptr};
 
     tableint enterpoint_node_{0};
     int maxlevel_{0};
 
-    size_t size_links_level0_{0};
     size_t offsetData_{0}, offsetLevel0_{0}, label_offset_{ 0 };
 
     char const *data_level0_memory_{nullptr};
@@ -457,6 +505,10 @@ private:
 
     DISTFUNC<dist_t> fstdistfunc_;
     void *dist_func_param_{nullptr};
+
+    //std::unique_ptr<VisitedListPool> visited_list_pool_{nullptr};
+
+    std::unique_ptr<VisitedBitmap> visited_bitmap_;
 
     DataMapping mapping_;
 };

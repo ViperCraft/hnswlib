@@ -1,5 +1,5 @@
 #include "../../hnswlib/hnswlib.h"
-#include "../../hnswlib/hnsw_fast_scan.h"
+#include "../../hnswlib/hnsw_fast_reader.h"
 
 template<typename T, typename S>
 static void test_recall_from_storage(std::string const &hnsw_path, S *space, float const *data, int dim, int max_elements)
@@ -65,11 +65,10 @@ static void test( int dim, int M, int max_elements )
 }
 
 int main() {
-    int max_elements = 100000;   // Maximum number of elements, should be known beforehand
     int M = 16;                 // Tightly connected with internal dimensionality of the data
                                 // strongly affects the memory consumption
-    for( int dim : {16, 32, 64, 128})
-        for( int max_elements : {10000, 100000})
-            test(dim, M, 10000);
+    for( int dim : {16, 32, 64, 128}) // dim of the vector data
+        for( int max_elements : {10000, 100000}) // Maximum number of elements, should be known beforehand
+            test(dim, M, max_elements);
     return 0;
 }

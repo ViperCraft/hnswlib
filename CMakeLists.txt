@@ -78,6 +78,9 @@ if(HNSWLIB_EXAMPLES)
     add_executable(example_mt_replace_deleted examples/cpp/example_mt_replace_deleted.cpp)
     target_link_libraries(example_mt_replace_deleted hnswlib)
 
+    add_executable(benchmark_fast_reader examples/cpp/benchmark_fast_reader.cpp)
+    target_link_libraries(benchmark_fast_reader hnswlib)
+
     # tests
     add_executable(multivector_search_test tests/cpp/multivector_search_test.cpp)
     target_link_libraries(multivector_search_test hnswlib)

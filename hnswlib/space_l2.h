@@ -56,6 +56,13 @@ L2SqrSIMD16ExtAVX512(const void *pVect1v, const void *pVect2v, const void *qty_p
 
 #if defined(USE_AVX)
 
+inline float _mm256_reduce_add_ps(__m256 x) {
+    __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(x, 1), _mm256_castps256_ps128(x));
+    __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+    __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+    return _mm_cvtss_f32(x32);
+}
+
 // Favor using AVX if available.
 static float
 L2SqrSIMD16ExtAVX(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
