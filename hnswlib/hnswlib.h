@@ -178,6 +178,8 @@ class SpaceInterface {
 
     virtual DISTFUNC<MTYPE> get_dist_func() = 0;
 
+    virtual DISTFUNC<MTYPE> get_dist_func_aligned() { return nullptr; }
+
     virtual void *get_dist_func_param() = 0;
 
     virtual ~SpaceInterface() {}

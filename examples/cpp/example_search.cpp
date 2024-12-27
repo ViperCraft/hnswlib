@@ -1,15 +1,29 @@
 #include "../../hnswlib/hnswlib.h"
 #include "../../hnswlib/hnsw_fast_reader.h"
 
+
+template<typename T>
+static hnswlib::labeltype search( float const *vec, int dim, T *api )
+{
+    auto result = api->searchKnn(vec, 1);
+    return result.top().second;
+}
+
+template<typename T>
+static hnswlib::labeltype search( float const *vec, int dim, hnswlib::HierarchicalNSWFastReader<float, T> *api )
+{
+    auto result = api->searchKnn(vec, vec + dim, 1);
+    return result.top().second;
+}
+
 template<typename T, typename S>
 static void test_recall_from_storage(std::string const &hnsw_path, S *space, float const *data, int dim, int max_elements)
 {
     T *alg_hnsw = new T(space, hnsw_path);
     float correct = 0;
     for (int i = 0; i < max_elements; i++) {
-        std::priority_queue<std::pair<float, hnswlib::labeltype>> result = alg_hnsw->searchKnn(data + i * dim, 1);
-        hnswlib::labeltype label = result.top().second;
-        if (label == i) correct++;
+        float const *vec = data + i * dim;
+        if (search(vec, dim, alg_hnsw) == i) correct++;
     }
     float recall = (float)correct / max_elements;
     std::cout << typeid(T).name() << " Recall of deserialized index: " << recall << "\n";

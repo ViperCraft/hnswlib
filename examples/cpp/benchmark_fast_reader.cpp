@@ -2,7 +2,7 @@
 #include <chrono>
 
 static int const dim = 64;
-static int const max_elements = 100000;
+static int const max_elements = 1000000;
 static int const M = 16;
 static int const ef_construction = 200;  // Controls index search speed/build speed tradeoff
 
@@ -27,10 +27,14 @@ void create_index_if_not_exists(float const *data)
     hnswlib::L2Space space(dim);
     hnswlib::HierarchicalNSW<float>* alg_hnsw = new hnswlib::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
 
-    // Add data to index
-    for (int i = 0; i < max_elements; i++) {
-        alg_hnsw->addPoint(data + i * dim, i);
+    {
+        Timelapse tm("append data");
+        // Add data to index
+        for (int i = 0; i < max_elements; i++) {
+            alg_hnsw->addPoint(data + i * dim, i);
+        }
     }
+    
     {
         Timelapse tm("saveIndex");
         // Serialize index
@@ -39,10 +43,26 @@ void create_index_if_not_exists(float const *data)
     delete alg_hnsw;
 }
 
+template<typename T>
+static hnswlib::labeltype search( float const *vec, T *api )
+{
+    auto result = api->searchKnn(vec, 1);
+    return result.top().second;
+}
+
+template<typename T>
+static hnswlib::labeltype search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api )
+{
+    auto result = api->searchKnn(vec, vec + dim, 1);
+    return result.top().second;
+}
+
+
 template<typename T, typename S>
 static void bench_recall_from_storage(S *space, float const *data, int ntimes )
 {
     std::chrono::high_resolution_clock::time_point t_start, t_end;
+    using hnswlib::labeltype;
     T *alg_hnsw;
     {
         Timelapse tm("loading index");
@@ -55,10 +75,9 @@ static void bench_recall_from_storage(S *space, float const *data, int ntimes )
         for( int t = 0; t < ntimes; ++t )
         {
             float correct = 0;
-            for (int i = 0; i < max_elements; i++) {
-                std::priority_queue<std::pair<float, hnswlib::labeltype>> result = alg_hnsw->searchKnn(data + i * dim, 1);
-                hnswlib::labeltype label = result.top().second;
-                if (label == i) correct++;
+            for (labeltype i = 0; i < max_elements; i++) {
+                float const *vec = data + i * dim;
+                if (search(vec, alg_hnsw) == i) correct++;
             }
             float recall = (float)correct / max_elements;
 
@@ -77,7 +96,7 @@ int main()
     std::mt19937 rng;
     rng.seed(47);
     std::uniform_real_distribution<> distrib_real;
-    float* data = new float[dim * max_elements];
+    float* data = (float*)hnswlib::aligned_malloc(dim * max_elements * sizeof(float), 64);
     for (int i = 0; i < dim * max_elements; i++) {
         data[i] = distrib_real(rng);
     }
@@ -89,9 +108,10 @@ int main()
 
     hnswlib::L2Space space(dim);
 
-    int ntimes = 20;
+    int ntimes = 3;
 
     bench_recall_from_storage<hnswlib::HierarchicalNSW<float>>(&space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float>>(&space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>>(&space, data, ntimes);
 
+    free(data);
 }

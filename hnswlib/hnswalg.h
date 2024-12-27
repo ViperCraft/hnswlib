@@ -118,7 +118,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
     using mutex_t = typename MT::mutex_type;
     using atomic_size_t = typename MT::template atomic_type<size_t>::type;
     using atomic_long_t = typename MT::template atomic_type<long>::type;
-    using VisitedListPool = VisitedListPool<mutex_t>;
+    using VisitedListPoolT = VisitedListPool<mutex_t>;
     using MT::getLabelOpMutex;
     using MT::getLinkedListMutex;
     size_t max_elements_{0};
@@ -135,7 +135,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
     double mult_{0.0}, revSize_{0.0};
     int maxlevel_{0};
 
-    std::unique_ptr<VisitedListPool> visited_list_pool_{nullptr};
+    std::unique_ptr<VisitedListPoolT> visited_list_pool_{nullptr};
 
     tableint enterpoint_node_{0};
 
@@ -225,7 +225,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
 
         cur_element_count = 0;
 
-        visited_list_pool_ = std::unique_ptr<VisitedListPool>(new VisitedListPool(1, max_elements));
+        visited_list_pool_ = std::unique_ptr<VisitedListPoolT>(new VisitedListPoolT(1, max_elements));
 
         // initializations for special treatment of the first node
         enterpoint_node_ = -1;
@@ -723,7 +723,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
         if (new_max_elements < cur_element_count)
             throw std::runtime_error("Cannot resize, max element is less than the current number of elements");
 
-        visited_list_pool_.reset(new VisitedListPool(1, new_max_elements));
+        visited_list_pool_.reset(new VisitedListPoolT(1, new_max_elements));
 
         element_levels_.resize(new_max_elements);
 
@@ -873,7 +873,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         MT::onResize(max_elements);
 
-        visited_list_pool_.reset(new VisitedListPool(1, max_elements));
+        visited_list_pool_.reset(new VisitedListPoolT(1, max_elements));
 
         linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
         if (linkLists_ == nullptr)
