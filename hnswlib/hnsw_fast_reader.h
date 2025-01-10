@@ -324,7 +324,7 @@ public:
 
     uint32_t getEf() const { return ef_; }
 
-    size_t getMaxElements() {
+    size_t getMaxElements() const {
         return max_elements_;
     }
 
