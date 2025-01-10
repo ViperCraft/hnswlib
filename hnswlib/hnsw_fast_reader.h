@@ -179,9 +179,10 @@ private:
         else
             out_mem_sz = sz + HUGE_PAGE_SIZE;
 
+#if defined(MADV_HUGEPAGE)
         // make THP
         madvise(mem, out_mem_sz, MADV_HUGEPAGE);
-
+#endif
         return mem;
     }
 };
@@ -234,10 +235,17 @@ class VisitedMapT {
 template<typename dist_t, typename MMapImpl = MMapDataMapper>
 class HierarchicalNSWFastReader
 {
+public:
     using pq_result_t = std::priority_queue<std::pair<dist_t, labeltype >>;
-    using pq_top_candidates_t = std::priority_queue<std::pair<dist_t, tableint>,
-        std::vector<std::pair<dist_t, tableint>>,
-        typename HierarchicalNSW<dist_t>::CompareByFirst>;
+    using result_list = std::vector<std::pair<dist_t, tableint>>;
+    struct pq_top_candidates_t : std::priority_queue<std::pair<dist_t, tableint>,
+        result_list, typename HierarchicalNSW<dist_t>::CompareByFirst>
+    {
+        pq_top_candidates_t( size_t reserve_n = 0 ) { reserve(reserve_n); }
+        result_list const& get_cont() const { return this->c; }
+        void reserve( size_t n ) { this->c.reserve(n); }
+        void clear() { this->c.clear(); }
+    };
 public:
 
     HierarchicalNSWFastReader(
@@ -258,7 +266,29 @@ public:
         pq_result_t result;
         if (max_elements_ == 0) return result;
 
-        tableint currObj = enterpoint_node_;
+        size_t max_ef = std::max(ef_, k);
+
+        pq_top_candidates_t top_candidates(max_ef);
+        searchKnnImpl(query_data, query_data_end, max_ef, top_candidates);
+
+        while (top_candidates.size() > k) {
+            top_candidates.pop();
+        }
+
+        while (top_candidates.size() > 0) {
+            std::pair<dist_t, tableint> rez = top_candidates.top();
+            result.push(std::pair<dist_t, labeltype>(rez.first, getExternalLabel(rez.second)));
+            top_candidates.pop();
+        }
+        return result;
+    }
+
+
+    // WARN: dangerous interface, don't use me if you not a Jedi ;)
+    void searchKnnImpl(const dist_t *query_data, const dist_t *query_data_end,
+        size_t max_ef, pq_top_candidates_t &top_candidates) const {
+
+        tableint ep_id = enterpoint_node_;
         dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), query_data_end);
 
         for (int level = maxlevel_; level > 0; level--) {
@@ -267,7 +297,7 @@ public:
                 changed = false;
                 tableint *data;
 
-                data = (unsigned int *) get_linklist(currObj, level);
+                data = (unsigned int *) get_linklist(ep_id, level);
                 int size = getListCount(data);
 
                 tableint *datal = data + 1;
@@ -277,36 +307,38 @@ public:
 
                     if (d < curdist) {
                         curdist = d;
-                        currObj = cand;
+                        ep_id = cand;
                         changed = true;
                     }
                 }
             }
         }
 
-        pq_top_candidates_t top_candidates = searchBaseLayerST(currObj, query_data, query_data_end, std::max(ef_, k));
+        searchBaseLayerST(ep_id, query_data, query_data_end, max_ef, top_candidates);
+    }
 
-        while (top_candidates.size() > k) {
-            top_candidates.pop();
-        }
-        while (top_candidates.size() > 0) {
-            std::pair<dist_t, tableint> rez = top_candidates.top();
-            result.push(std::pair<dist_t, labeltype>(rez.first, getExternalLabel(rez.second)));
-            top_candidates.pop();
-        }
-        return result;
+
+    void setEf(uint32_t ef) {
+        ef_ = ef;
+    }
+
+    uint32_t getEf() const { return ef_; }
+
+    size_t getMaxElements() {
+        return max_elements_;
     }
 
 private:
 
     pq_top_candidates_t
-    searchBaseLayerST(tableint ep_id, const dist_t *data_point, const dist_t *query_data_end, size_t ef) const {
+    searchBaseLayerST(tableint ep_id, const dist_t *data_point, const dist_t *query_data_end,
+        size_t ef, pq_top_candidates_t &top_candidates) const {
         visited_map_->reset();
 
         auto const *visited_array = visited_map_->arr;
 
-        pq_top_candidates_t top_candidates;
-        pq_top_candidates_t candidate_set;
+        // sorry don't know better numbers, must be tuned
+        pq_top_candidates_t candidate_set(256);
 
         dist_t lowerBound;
         char const* ep_data = getDataByInternalId(ep_id);
@@ -452,10 +484,6 @@ private:
 
     inline char const* getDataByInternalId(tableint internal_id) const {
         return (internal_id * size_data_per_element_ + offsetData_);
-    }
-
-    size_t getMaxElements() {
-        return max_elements_;
     }
 
     inline linklistsizeint *get_linklist0(tableint internal_id) const {

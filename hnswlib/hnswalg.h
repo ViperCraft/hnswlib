@@ -167,6 +167,18 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
     mutable mutex_t label_lookup_lock;  // lock for label_lookup_
     mutex_t deleted_elements_lock;  // lock for deleted_elements
 
+public:
+    struct CompareByFirst {
+        constexpr bool operator()(std::pair<dist_t, tableint> const& a,
+            std::pair<dist_t, tableint> const& b) const noexcept {
+            return a.first < b.first;
+        }
+    };
+
+    using pq_top_candidates_t = std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>;
+
+public:
+
 
     HierarchicalNSW(SpaceInterface<dist_t> *s) {
     }
@@ -258,14 +270,6 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
     }
 
 
-    struct CompareByFirst {
-        constexpr bool operator()(std::pair<dist_t, tableint> const& a,
-            std::pair<dist_t, tableint> const& b) const noexcept {
-            return a.first < b.first;
-        }
-    };
-
-
     void setEf(size_t ef) {
         ef_ = ef;
     }
@@ -311,14 +315,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t>, private MT {
         return num_deleted_;
     }
 
-    std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
+    pq_top_candidates_t
     searchBaseLayer(tableint ep_id, const void *data_point, int layer) {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates;
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidateSet;
+        pq_top_candidates_t top_candidates;
+        pq_top_candidates_t candidateSet;
 
         dist_t lowerBound;
         if (!isMarkedDeleted(ep_id)) {

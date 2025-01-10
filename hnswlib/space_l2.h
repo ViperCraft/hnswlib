@@ -71,6 +71,8 @@ L2SqrSIMD16ExtAVX_ALIGNED(const void *pVect1v, const void *pVect2v, const void *
     const float *pEnd1 = (float*)pEnd1v;
 
     __m256 diff, v1, v2;
+    // server processors had much more underloading ALU than LS buffers
+    // for using less dependency(two sums) will show me better results
     __m256 sum = _mm256_set1_ps(0), sum2 = _mm256_set1_ps(0);
 
     while (pVect1 < pEnd1) {
@@ -185,7 +187,6 @@ L2SqrSIMD16ExtSSE_ALIGNED(const void *pVect1v, const void *pVect2v, const void *
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
-    float PORTABLE_ALIGN32 TmpRes[8];
 
     __m128 diff, v1, v2;
     __m128 sum = _mm_set1_ps(0);
@@ -221,8 +222,9 @@ L2SqrSIMD16ExtSSE_ALIGNED(const void *pVect1v, const void *pVect2v, const void *
         sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
     }
 
-    _mm_store_ps(TmpRes, sum);
-    return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
+    sum = _mm_hadd_ps (sum, sum);
+    sum = _mm_hadd_ps (sum, sum);
+    return  _mm_cvtss_f32 (sum);
 }
 #endif
 
@@ -329,11 +331,11 @@ class L2Space : public SpaceInterface<float> {
         data_size_ = dim * sizeof(float);
     }
 
-    size_t get_data_size() {
+    size_t get_data_size() override {
         return data_size_;
     }
 
-    DISTFUNC<float> get_dist_func() {
+    DISTFUNC<float> get_dist_func() override {
         return fstdistfunc_;
     }
 
@@ -341,7 +343,7 @@ class L2Space : public SpaceInterface<float> {
         return fstdistfunc_aligned_;
     }
 
-    void *get_dist_func_param() {
+    void *get_dist_func_param() override {
         return &dim_;
     }
 

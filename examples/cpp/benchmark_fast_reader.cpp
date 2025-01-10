@@ -15,7 +15,7 @@ struct Timelapse
     Timelapse( char const *name) : name(name) { t_start = std::chrono::high_resolution_clock::now(); }
     ~Timelapse() {
         t_end = std::chrono::high_resolution_clock::now();
-        std::cout   << "timelapse for " << name 
+        std::cout   << "timelapse for " << name
                     << " done in " << std::chrono::duration_cast<std::chrono::milliseconds>( t_end - t_start ).count()
                     << " millis.\n";
     }
@@ -34,7 +34,7 @@ void create_index_if_not_exists(float const *data)
             alg_hnsw->addPoint(data + i * dim, i);
         }
     }
-    
+
     {
         Timelapse tm("saveIndex");
         // Serialize index
@@ -43,22 +43,35 @@ void create_index_if_not_exists(float const *data)
     delete alg_hnsw;
 }
 
-template<typename T>
-static hnswlib::labeltype search( float const *vec, T *api )
+template<bool raw_api, typename T, typename PQ>
+static bool search( float const *vec, T *api, hnswlib::labeltype i, PQ & )
 {
     auto result = api->searchKnn(vec, 1);
-    return result.top().second;
+    return result.top().second == i;
 }
 
-template<typename T>
-static hnswlib::labeltype search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api )
+template<bool raw_api, typename T, typename PQ>
+static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api,
+    hnswlib::labeltype i, PQ &pq )
 {
-    auto result = api->searchKnn(vec, vec + dim, 1);
-    return result.top().second;
+    if( !raw_api )
+    {
+        auto result = api->searchKnn(vec, vec + dim, 1);
+        return result.top().second == i;
+    }
+    else
+    {
+        api->searchKnnImpl(vec, vec + dim, std::max(1U, api->getEf()), pq);
+        auto const &results = pq.get_cont();
+        bool res = std::find_if(results.begin(), results.end(), [i] ( std::pair<float, uint32_t> p ) { return p.second == i;})
+            != results.end();
+        pq.clear();
+        return res;
+    }
 }
 
 
-template<typename T, typename S>
+template<typename T, bool raw_api, typename S>
 static void bench_recall_from_storage(S *space, float const *data, int ntimes )
 {
     std::chrono::high_resolution_clock::time_point t_start, t_end;
@@ -67,24 +80,27 @@ static void bench_recall_from_storage(S *space, float const *data, int ntimes )
     {
         Timelapse tm("loading index");
         alg_hnsw = new T(space, INDEX_NAME);
+        std::cout << "Index nelements: " << alg_hnsw->getMaxElements() << ", ";
     }
+
 
     float avg_recall = 0;
     {
         Timelapse tm("benching");
+        typename T::pq_top_candidates_t top_candidates;
         for( int t = 0; t < ntimes; ++t )
         {
             float correct = 0;
             for (labeltype i = 0; i < max_elements; i++) {
                 float const *vec = data + i * dim;
-                if (search(vec, alg_hnsw) == i) correct++;
+                if (search<raw_api>(vec, alg_hnsw, i, top_candidates)) correct++;
             }
             float recall = (float)correct / max_elements;
 
             avg_recall += recall;
         }
     }
-    std::cout << typeid(T).name() << " Recall of deserialized index: " 
+    std::cout << typeid(T).name() << " Recall of deserialized index: "
         << avg_recall / ntimes << std::endl;
 
     delete alg_hnsw;
@@ -102,7 +118,7 @@ int main()
     }
 
     std::ifstream f(INDEX_NAME);
-    
+
     if( !f.good() )
         create_index_if_not_exists(data);
 
@@ -110,8 +126,9 @@ int main()
 
     int ntimes = 3;
 
-    bench_recall_from_storage<hnswlib::HierarchicalNSW<float>>(&space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>>(&space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSW<float>, false>(&space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, false>(&space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, true>(&space, data, ntimes);
 
     free(data);
 }
