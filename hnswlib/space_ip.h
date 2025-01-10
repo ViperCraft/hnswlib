@@ -472,7 +472,11 @@ class InnerProductSpace : public SpaceInterface<float> {
         return fstdistfunc_aligned_;
     }
 
-~InnerProductSpace() {}
+    size_t get_dim() const override {
+        return dim_;
+    }
+
+    ~InnerProductSpace() {}
 };
 
 }  // namespace hnswlib

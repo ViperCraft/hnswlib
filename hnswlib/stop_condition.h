@@ -62,6 +62,10 @@ class MultiVectorL2Space : public BaseMultiVectorSpace<DOCIDTYPE> {
         return &dim_;
     }
 
+    size_t get_dim() const override {
+        return dim_;
+    }
+
     DOCIDTYPE get_doc_id(const void *datapoint) override {
         return *(DOCIDTYPE *)((char *)datapoint + vector_size_);
     }

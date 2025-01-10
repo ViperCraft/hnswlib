@@ -328,6 +328,15 @@ public:
         return max_elements_;
     }
 
+    // WARN: query_point must be aligned!!!
+    dist_t getDistance( const dist_t *query_point, const dist_t *query_point_end, tableint to ) const {
+        char const* to_data = getDataByInternalId(to);
+        return stdistfunc_(query_point, to_data, query_point_end);
+    }
+
+    inline char const* getDataByInternalId(tableint internal_id) const {
+        return (internal_id * size_data_per_element_ + offsetData_);
+    }
 private:
 
     pq_top_candidates_t
@@ -480,10 +489,6 @@ private:
         labeltype return_label;
         memcpy(&return_label, (internal_id * size_data_per_element_ + label_offset_), sizeof(labeltype));
         return return_label;
-    }
-
-    inline char const* getDataByInternalId(tableint internal_id) const {
-        return (internal_id * size_data_per_element_ + offsetData_);
     }
 
     inline linklistsizeint *get_linklist0(tableint internal_id) const {

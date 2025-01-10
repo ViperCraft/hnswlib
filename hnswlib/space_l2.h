@@ -340,6 +340,10 @@ class L2Space : public SpaceInterface<float> {
         return &dim_;
     }
 
+    size_t get_dim() const override {
+        return dim_;
+    }
+
     ~L2Space() {}
 };
 
@@ -398,16 +402,20 @@ class L2SpaceI : public SpaceInterface<int> {
         data_size_ = dim * sizeof(unsigned char);
     }
 
-    size_t get_data_size() {
+    size_t get_data_size() override {
         return data_size_;
     }
 
-    DISTFUNC<int> get_dist_func() {
+    DISTFUNC<int> get_dist_func() override {
         return fstdistfunc_;
     }
 
-    void *get_dist_func_param() {
+    void *get_dist_func_param() override {
         return &dim_;
+    }
+
+    size_t get_dim() const override {
+        return dim_;
     }
 
     ~L2SpaceI() {}
