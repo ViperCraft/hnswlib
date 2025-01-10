@@ -6,7 +6,7 @@ static int const max_elements = 1000000;
 static int const M = 16;
 static int const ef_construction = 200;  // Controls index search speed/build speed tradeoff
 
-char const INDEX_NAME[] = { "bench-index.hnsw" };
+char const *INDEX_NAMES[] = { "bench-index-l2.hnsw", "bench-index-ip.hnsw" };
 
 struct Timelapse
 {
@@ -21,26 +21,33 @@ struct Timelapse
     }
 };
 
-void create_index_if_not_exists(float const *data)
+
+template<typename S>
+void create_index_if_not_exists(float const *data, char const *fname)
 {
-    // Initing index
-    hnswlib::L2Space space(dim);
-    hnswlib::HierarchicalNSW<float>* alg_hnsw = new hnswlib::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
-
+    std::ifstream f(fname);
+    if( !f.good() )
     {
-        Timelapse tm("append data");
-        // Add data to index
-        for (int i = 0; i < max_elements; i++) {
-            alg_hnsw->addPoint(data + i * dim, i);
+        std::cout << "DB fname: " << fname << " not found, creating new index of " << max_elements << " items." << std::endl;
+        // Initing index
+        S space(dim);
+        hnswlib::HierarchicalNSW<float>* alg_hnsw = new hnswlib::HierarchicalNSW<float>(&space, max_elements, M, ef_construction);
+
+        {
+            Timelapse tm("append data");
+            // Add data to index
+            for (int i = 0; i < max_elements; i++) {
+                alg_hnsw->addPoint(data + i * dim, i);
+            }
         }
-    }
 
-    {
-        Timelapse tm("saveIndex");
-        // Serialize index
-        alg_hnsw->saveIndex(INDEX_NAME);
+        {
+            Timelapse tm("saveIndex");
+            // Serialize index
+            alg_hnsw->saveIndex(fname);
+        }
+        delete alg_hnsw;
     }
-    delete alg_hnsw;
 }
 
 template<bool raw_api, typename T, typename PQ>
@@ -72,14 +79,14 @@ static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, 
 
 
 template<typename T, bool raw_api, typename S>
-static void bench_recall_from_storage(S *space, float const *data, int ntimes )
+static void bench_recall_from_storage(char const *fname, S *space, float const *data, int ntimes )
 {
     std::chrono::high_resolution_clock::time_point t_start, t_end;
     using hnswlib::labeltype;
     T *alg_hnsw;
     {
         Timelapse tm("loading index");
-        alg_hnsw = new T(space, INDEX_NAME);
+        alg_hnsw = new T(space, fname);
         std::cout << "Index nelements: " << alg_hnsw->getMaxElements() << ", ";
     }
 
@@ -106,6 +113,20 @@ static void bench_recall_from_storage(S *space, float const *data, int ntimes )
     delete alg_hnsw;
 }
 
+
+template<typename S>
+void test( int ntimes, int dim, float const *data, char const *fname )
+{
+    create_index_if_not_exists<S>(data, fname);
+    S space(dim);
+
+    std::cout << "Start benchmarking for space: " << typeid(S).name() << " dim: " << dim << std::endl;
+
+    bench_recall_from_storage<hnswlib::HierarchicalNSW<float>, false>(fname, &space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, false>(fname, &space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, true>(fname, &space, data, ntimes);
+}
+
 int main()
 {
     // Generate random data
@@ -117,18 +138,9 @@ int main()
         data[i] = distrib_real(rng);
     }
 
-    std::ifstream f(INDEX_NAME);
 
-    if( !f.good() )
-        create_index_if_not_exists(data);
-
-    hnswlib::L2Space space(dim);
-
-    int ntimes = 3;
-
-    bench_recall_from_storage<hnswlib::HierarchicalNSW<float>, false>(&space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, false>(&space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, true>(&space, data, ntimes);
+    //test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
+    test<hnswlib::InnerProductSpace>(3, dim, data, INDEX_NAMES[1]);
 
     free(data);
 }

@@ -20,6 +20,34 @@ InnerProductDistance(const void *pVect1, const void *pVect2, const void *qty_ptr
 
 #if defined(USE_AVX)
 
+static float
+InnerProductSIMD4ExtAVX_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m256 v1, v2;
+    // server processors had much more underloading ALU than LS buffers
+    // for using less dependency(two sums) will show me better results
+    __m256 sum = _mm256_set1_ps(0), sum2 = _mm256_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(v1, v2));
+
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum2 = _mm256_add_ps(sum2, _mm256_mul_ps(v1, v2));
+    }
+
+    return 1.f - _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
+}
+
 // Favor using AVX if available.
 static float
 InnerProductSIMD4ExtAVX(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -131,6 +159,47 @@ InnerProductSIMD4ExtSSE(const void *pVect1v, const void *pVect2v, const void *qt
     float sum = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
 
     return sum;
+}
+
+static float
+InnerProductSIMD16ExtSSE_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m128 v1, v2;
+    __m128 sum = _mm_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        sum = _mm_add_ps(sum, _mm_mul_ps(v1, v2));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        sum = _mm_add_ps(sum, _mm_mul_ps(v1, v2));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        sum = _mm_add_ps(sum, _mm_mul_ps(v1, v2));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        sum = _mm_add_ps(sum, _mm_mul_ps(v1, v2));
+    }
+
+    sum = _mm_hadd_ps (sum, sum);
+    sum = _mm_hadd_ps (sum, sum);
+    return  1.f - _mm_cvtss_f32 (sum);
 }
 
 static float
@@ -309,6 +378,7 @@ static DISTFUNC<float> InnerProductSIMD16Ext = InnerProductSIMD16ExtSSE;
 static DISTFUNC<float> InnerProductSIMD4Ext = InnerProductSIMD4ExtSSE;
 static DISTFUNC<float> InnerProductDistanceSIMD16Ext = InnerProductDistanceSIMD16ExtSSE;
 static DISTFUNC<float> InnerProductDistanceSIMD4Ext = InnerProductDistanceSIMD4ExtSSE;
+static DISTFUNC<float> InnerProductSIMD16ExtAligned = InnerProductSIMD16ExtSSE_ALIGNED;
 
 static float
 InnerProductDistanceSIMD16ExtResiduals(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -340,7 +410,7 @@ InnerProductDistanceSIMD4ExtResiduals(const void *pVect1v, const void *pVect2v, 
 #endif
 
 class InnerProductSpace : public SpaceInterface<float> {
-    DISTFUNC<float> fstdistfunc_;
+    DISTFUNC<float> fstdistfunc_, fstdistfunc_aligned_ = nullptr;
     size_t data_size_;
     size_t dim_;
 
@@ -360,6 +430,7 @@ class InnerProductSpace : public SpaceInterface<float> {
         if (AVXCapable()) {
             InnerProductSIMD16Ext = InnerProductSIMD16ExtAVX;
             InnerProductDistanceSIMD16Ext = InnerProductDistanceSIMD16ExtAVX;
+            InnerProductSIMD16ExtAligned = InnerProductSIMD4ExtAVX_ALIGNED;
         }
     #endif
     #if defined(USE_AVX)
@@ -370,7 +441,10 @@ class InnerProductSpace : public SpaceInterface<float> {
     #endif
 
         if (dim % 16 == 0)
+        {
             fstdistfunc_ = InnerProductDistanceSIMD16Ext;
+            fstdistfunc_aligned_ = InnerProductSIMD16ExtAligned;
+        }
         else if (dim % 4 == 0)
             fstdistfunc_ = InnerProductDistanceSIMD4Ext;
         else if (dim > 16)
@@ -382,16 +456,20 @@ class InnerProductSpace : public SpaceInterface<float> {
         data_size_ = dim * sizeof(float);
     }
 
-    size_t get_data_size() {
+    size_t get_data_size() override {
         return data_size_;
     }
 
-    DISTFUNC<float> get_dist_func() {
+    DISTFUNC<float> get_dist_func() override {
         return fstdistfunc_;
     }
 
-    void *get_dist_func_param() {
+    void *get_dist_func_param() override {
         return &dim_;
+    }
+
+    DISTFUNC<float> get_dist_func_aligned() override {
+        return fstdistfunc_aligned_;
     }
 
 ~InnerProductSpace() {}
