@@ -331,7 +331,7 @@ public:
     // WARN: query_point must be aligned!!!
     dist_t getDistance( const dist_t *query_point, const dist_t *query_point_end, tableint to ) const {
         char const* to_data = getDataByInternalId(to);
-        return stdistfunc_(query_point, to_data, query_point_end);
+        return fstdistfunc_(query_point, to_data, query_point_end);
     }
 
     inline char const* getDataByInternalId(tableint internal_id) const {

@@ -139,7 +139,7 @@ int main()
     }
 
 
-    //test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
+    test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
     test<hnswlib::InnerProductSpace>(3, dim, data, INDEX_NAMES[1]);
 
     free(data);

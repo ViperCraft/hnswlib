@@ -19,6 +19,83 @@ L2Sqr(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
     return (res);
 }
 
+__attribute__((target("default")))
+static float
+L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m128 diff, v1, v2;
+    __m128 sum = _mm_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+
+        v1 = _mm_load_ps(pVect1);
+        pVect1 += 4;
+        v2 = _mm_loadu_ps(pVect2);
+        pVect2 += 4;
+        diff = _mm_sub_ps(v1, v2);
+        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+    }
+
+    sum = _mm_hadd_ps (sum, sum);
+    sum = _mm_hadd_ps (sum, sum);
+    return  _mm_cvtss_f32 (sum);
+}
+
+__attribute__((target("avx")))
+static float
+L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m256 diff, v1, v2;
+    // server processors had much more underloading ALU than LS buffers
+    // for using less dependency(two sums) will show me better results
+    __m256 sum = _mm256_set1_ps(0), sum2 = _mm256_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        diff = _mm256_sub_ps(v1, v2);
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        diff = _mm256_sub_ps(v1, v2);
+        sum2 = _mm256_add_ps(sum2, _mm256_mul_ps(diff, diff));
+    }
+
+    return _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
+}
+
 #if defined(USE_AVX512)
 
 // Favor using AVX512 if available.
@@ -55,37 +132,6 @@ L2SqrSIMD16ExtAVX512(const void *pVect1v, const void *pVect2v, const void *qty_p
 #endif
 
 #if defined(USE_AVX)
-
-// Favor using AVX if available.
-static float
-L2SqrSIMD16ExtAVX_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
-    float *pVect1 = (float *) pVect1v;
-    float *pVect2 = (float *) pVect2v;
-    const float *pEnd1 = (float*)pEnd1v;
-
-    __m256 diff, v1, v2;
-    // server processors had much more underloading ALU than LS buffers
-    // for using less dependency(two sums) will show me better results
-    __m256 sum = _mm256_set1_ps(0), sum2 = _mm256_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
-        v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
-        diff = _mm256_sub_ps(v1, v2);
-        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-
-        v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
-        v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
-        diff = _mm256_sub_ps(v1, v2);
-        sum2 = _mm256_add_ps(sum2, _mm256_mul_ps(diff, diff));
-    }
-
-    return _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
-}
 
 // Favor using AVX if available.
 static float
@@ -174,56 +220,10 @@ L2SqrSIMD16ExtSSE(const void *pVect1v, const void *pVect2v, const void *qty_ptr)
     _mm_store_ps(TmpRes, sum);
     return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
 }
-
-static float
-L2SqrSIMD16ExtSSE_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
-    float *pVect1 = (float *) pVect1v;
-    float *pVect2 = (float *) pVect2v;
-    const float *pEnd1 = (float*)pEnd1v;
-
-    __m128 diff, v1, v2;
-    __m128 sum = _mm_set1_ps(0);
-
-    while (pVect1 < pEnd1) {
-        //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
-        v1 = _mm_load_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_load_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_load_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-        v1 = _mm_load_ps(pVect1);
-        pVect1 += 4;
-        v2 = _mm_loadu_ps(pVect2);
-        pVect2 += 4;
-        diff = _mm_sub_ps(v1, v2);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-
-    sum = _mm_hadd_ps (sum, sum);
-    sum = _mm_hadd_ps (sum, sum);
-    return  _mm_cvtss_f32 (sum);
-}
 #endif
 
 #if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
 static DISTFUNC<float> L2SqrSIMD16Ext = L2SqrSIMD16ExtSSE;
-static DISTFUNC<float> L2SqrSIMD16ExtAligned = L2SqrSIMD16ExtSSE_ALIGNED;
 
 static float
 L2SqrSIMD16ExtResiduals(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
@@ -302,16 +302,13 @@ class L2Space : public SpaceInterface<float> {
         }
     #elif defined(USE_AVX)
         if (AVXCapable())
-        {
             L2SqrSIMD16Ext = L2SqrSIMD16ExtAVX;
-            L2SqrSIMD16ExtAligned = L2SqrSIMD16ExtAVX_ALIGNED;
-        }
     #endif
 
         if (dim % 16 == 0)
         {
             fstdistfunc_ = L2SqrSIMD16Ext;
-            fstdistfunc_aligned_ = L2SqrSIMD16ExtAligned;
+            fstdistfunc_aligned_ = L2SqrSIMD16Ext_ALIGNED;
         }
         else if (dim % 4 == 0)
             fstdistfunc_ = L2SqrSIMD4Ext;
