@@ -50,16 +50,16 @@ void create_index_if_not_exists(float const *data, char const *fname)
     }
 }
 
-template<bool raw_api, typename T, typename PQ>
-static bool search( float const *vec, T *api, hnswlib::labeltype i, PQ & )
+template<bool raw_api, typename T>
+static bool search( float const *vec, T *api, hnswlib::labeltype i )
 {
     auto result = api->searchKnn(vec, 1);
     return result.top().second == i;
 }
 
-template<bool raw_api, typename T, typename PQ>
+template<bool raw_api, typename T>
 static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api,
-    hnswlib::labeltype i, PQ &pq )
+    hnswlib::labeltype i )
 {
     if( !raw_api )
     {
@@ -68,15 +68,22 @@ static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, 
     }
     else
     {
-        api->searchKnnImpl(vec, vec + dim, std::max(1U, api->getEf()), pq);
-        auto const &results = pq.get_cont();
-        bool res = std::find_if(results.begin(), results.end(), [i] ( std::pair<float, uint32_t> p ) { return p.second == i;})
-            != results.end();
-        pq.clear();
-        return res;
+        auto result = api->searchKnnDistanceLimit(vec, vec + dim, std::max(1U, api->getEf()), 2.f);
+        return !result.empty() ? result.front().second == i : false;
     }
 }
 
+template<typename T>
+static void debug_print( T *api )
+{
+
+}
+
+template<typename T>
+static void debug_print( hnswlib::HierarchicalNSWFastReader<float, T> *api )
+{
+    //std::cout << "get_avg_candidate_set_size()=" << api->get_avg_candidate_set_size() << std::endl;
+}
 
 template<typename T, bool raw_api, typename S>
 static void bench_recall_from_storage(char const *fname, S *space, float const *data, int ntimes )
@@ -94,13 +101,12 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
     float avg_recall = 0;
     {
         Timelapse tm("benching");
-        typename T::pq_top_candidates_t top_candidates;
         for( int t = 0; t < ntimes; ++t )
         {
             float correct = 0;
             for (labeltype i = 0; i < max_elements; i++) {
                 float const *vec = data + i * dim;
-                if (search<raw_api>(vec, alg_hnsw, i, top_candidates)) correct++;
+                if (search<raw_api>(vec, alg_hnsw, i)) correct++;
             }
             float recall = (float)correct / max_elements;
 
@@ -109,6 +115,9 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
     }
     std::cout << typeid(T).name() << " Recall of deserialized index: "
         << avg_recall / ntimes << std::endl;
+
+
+    debug_print(alg_hnsw);
 
     delete alg_hnsw;
 }
@@ -139,7 +148,7 @@ int main()
     }
 
 
-    test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
+    //test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
     test<hnswlib::InnerProductSpace>(3, dim, data, INDEX_NAMES[1]);
 
     free(data);

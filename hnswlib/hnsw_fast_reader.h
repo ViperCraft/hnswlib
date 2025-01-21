@@ -283,6 +283,24 @@ public:
         return result;
     }
 
+    result_list searchKnnDistanceLimit(const dist_t *query_data, 
+        const dist_t *query_data_end, size_t max_ef, dist_t max_distance) const {
+        pq_top_candidates_t top_candidates(max_ef);
+        searchKnnImpl(query_data, query_data_end, max_ef, top_candidates);
+
+        result_list result;
+        result.reserve(top_candidates.size());
+
+        while (top_candidates.size() > 0) {
+            auto [dist, int_id] = top_candidates.top();
+            if( dist > max_distance )
+                break;
+            top_candidates.pop();
+            result.emplace_back(dist, getExternalLabel(int_id));
+        }
+        return result;
+    }
+
 
     // WARN: dangerous interface, don't use me if you not a Jedi ;)
     void searchKnnImpl(const dist_t *query_data, const dist_t *query_data_end,
@@ -314,7 +332,7 @@ public:
             }
         }
 
-        searchBaseLayerST(ep_id, query_data, query_data_end, max_ef, top_candidates);
+        searchBaseLayerST(ep_id, curdist, query_data, query_data_end, max_ef, top_candidates);
     }
 
 
@@ -337,24 +355,23 @@ public:
     inline char const* getDataByInternalId(tableint internal_id) const {
         return (internal_id * size_data_per_element_ + offsetData_);
     }
+
 private:
 
+
     pq_top_candidates_t
-    searchBaseLayerST(tableint ep_id, const dist_t *data_point, const dist_t *query_data_end,
+    searchBaseLayerST(tableint ep_id, dist_t lowerBound, const dist_t *query_data, const dist_t *query_data_end,
         size_t ef, pq_top_candidates_t &top_candidates) const {
+
+        // average depth seems to be less than 64 in my tests
+        // but you always must be stay tuned!
+        pq_top_candidates_t candidate_set(64);
+
+        top_candidates.emplace(lowerBound, ep_id);
+        candidate_set.emplace(-lowerBound, ep_id);
+
         visited_map_->reset();
-
         auto const *visited_array = visited_map_->arr;
-
-        // sorry don't know better numbers, must be tuned
-        pq_top_candidates_t candidate_set(256);
-
-        dist_t lowerBound;
-        char const* ep_data = getDataByInternalId(ep_id);
-        dist_t dist = fstdistfunc_(data_point, ep_data, query_data_end);
-        lowerBound = dist;
-        top_candidates.emplace(dist, ep_id);
-        candidate_set.emplace(-dist, ep_id);
 
         visited_map_->set(ep_id);
 
@@ -384,8 +401,8 @@ private:
                                 _MM_HINT_T0);  ////////////
 #endif
                 if( visited_map_->mark(candidate_id) ) {
-                    ep_data = getDataByInternalId(candidate_id);
-                    dist_t dist = fstdistfunc_(data_point, ep_data, query_data_end);
+                    char const* ep_data = getDataByInternalId(candidate_id);
+                    dist_t dist = fstdistfunc_(query_data, ep_data, query_data_end);
 
                     bool flag_consider_candidate =
                         top_candidates.size() < ef || lowerBound > dist;
