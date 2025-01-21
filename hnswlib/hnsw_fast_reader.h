@@ -275,30 +275,29 @@ public:
             top_candidates.pop();
         }
 
-        while (top_candidates.size() > 0) {
-            std::pair<dist_t, tableint> rez = top_candidates.top();
+        while (!top_candidates.empty()) {
+            auto rez = top_candidates.top();
             result.push(std::pair<dist_t, labeltype>(rez.first, getExternalLabel(rez.second)));
             top_candidates.pop();
         }
         return result;
     }
 
-    result_list searchKnnDistanceLimit(const dist_t *query_data, 
-        const dist_t *query_data_end, size_t max_ef, dist_t max_distance) const {
+    // keeps original API semantics
+    // Filter functor works as flow stopper too, return true, if you want early exit
+    template<typename Filter>
+    void searchKnnFilter(const dist_t *query_data,
+        const dist_t *query_data_end, uint32_t k, Filter f) const {
+        size_t max_ef = std::max(ef_, k);
         pq_top_candidates_t top_candidates(max_ef);
         searchKnnImpl(query_data, query_data_end, max_ef, top_candidates);
 
-        result_list result;
-        result.reserve(top_candidates.size());
-
-        while (top_candidates.size() > 0) {
-            auto [dist, int_id] = top_candidates.top();
-            if( dist > max_distance )
+        // traverse pq as array
+        for( auto p : top_candidates.get_cont() )
+        {
+            if( f(p) )
                 break;
-            top_candidates.pop();
-            result.emplace_back(dist, getExternalLabel(int_id));
         }
-        return result;
     }
 
 
@@ -354,6 +353,12 @@ public:
 
     inline char const* getDataByInternalId(tableint internal_id) const {
         return (internal_id * size_data_per_element_ + offsetData_);
+    }
+
+    inline labeltype getExternalLabel(tableint internal_id) const {
+        labeltype return_label;
+        memcpy(&return_label, (internal_id * size_data_per_element_ + label_offset_), sizeof(labeltype));
+        return return_label;
     }
 
 private:
@@ -499,13 +504,6 @@ private:
             if( input > end_addr )
                 throw std::runtime_error("file read error");
         }
-    }
-
-
-    inline labeltype getExternalLabel(tableint internal_id) const {
-        labeltype return_label;
-        memcpy(&return_label, (internal_id * size_data_per_element_ + label_offset_), sizeof(labeltype));
-        return return_label;
     }
 
     inline linklistsizeint *get_linklist0(tableint internal_id) const {

@@ -47,6 +47,35 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
     return 1.f - _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
 }
 
+__attribute__((target("avx2")))
+static float
+InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m256 v1, v2;
+    // server processors had much more underloading ALU than LS buffers
+    // for using less dependency(two sums) will show me better results
+    __m256 sum = _mm256_set1_ps(0), sum2 = _mm256_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum = _mm256_fmadd_ps(v1, v2, sum);
+
+        v1 = _mm256_load_ps(pVect1);
+        pVect1 += 8;
+        v2 = _mm256_loadu_ps(pVect2);
+        pVect2 += 8;
+        sum2 = _mm256_fmadd_ps(v1, v2, sum2);
+    }
+
+    return 1.f - _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
+}
+
 __attribute__((target("default")))
 static float
 InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {

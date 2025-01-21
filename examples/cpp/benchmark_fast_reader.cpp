@@ -50,26 +50,34 @@ void create_index_if_not_exists(float const *data, char const *fname)
     }
 }
 
-template<bool raw_api, typename T>
+template<bool filter_api, typename T>
 static bool search( float const *vec, T *api, hnswlib::labeltype i )
 {
     auto result = api->searchKnn(vec, 1);
     return result.top().second == i;
 }
 
-template<bool raw_api, typename T>
+template<bool filter_api, typename T>
 static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api,
     hnswlib::labeltype i )
 {
-    if( !raw_api )
+    if( !filter_api )
     {
         auto result = api->searchKnn(vec, vec + dim, 1);
         return result.top().second == i;
     }
     else
     {
-        auto result = api->searchKnnDistanceLimit(vec, vec + dim, std::max(1U, api->getEf()), 2.f);
-        return !result.empty() ? result.front().second == i : false;
+        bool found = false;
+        api->searchKnnFilter(vec, vec + dim, 1, [&] ( std::pair<float, hnswlib::labeltype> p ) {
+            if( api->getExternalLabel(p.second) == i )
+            {
+                found = true;
+                return true;
+            }
+            return false;
+        });
+        return found;
     }
 }
 
@@ -85,7 +93,7 @@ static void debug_print( hnswlib::HierarchicalNSWFastReader<float, T> *api )
     //std::cout << "get_avg_candidate_set_size()=" << api->get_avg_candidate_set_size() << std::endl;
 }
 
-template<typename T, bool raw_api, typename S>
+template<typename T, bool filter_api, typename S>
 static void bench_recall_from_storage(char const *fname, S *space, float const *data, int ntimes )
 {
     std::chrono::high_resolution_clock::time_point t_start, t_end;
@@ -106,7 +114,7 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
             float correct = 0;
             for (labeltype i = 0; i < max_elements; i++) {
                 float const *vec = data + i * dim;
-                if (search<raw_api>(vec, alg_hnsw, i)) correct++;
+                if (search<filter_api>(vec, alg_hnsw, i)) correct++;
             }
             float recall = (float)correct / max_elements;
 
@@ -148,8 +156,35 @@ int main()
     }
 
 
-    //test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
+    test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
     test<hnswlib::InnerProductSpace>(3, dim, data, INDEX_NAMES[1]);
 
     free(data);
 }
+
+/* some results from single Xeon E5 Haswell 2.3Ghz with DDR3 memory*/
+/*
+DB fname: bench-index-l2.hnsw not found, creating new index of 1000000 items.
+timelapse for append data done in 467515 millis.
+timelapse for saveIndex done in 204 millis.
+Start benchmarking for space: N7hnswlib7L2SpaceE dim: 64
+Index nelements: 1000000, timelapse for loading index done in 1266 millis.
+timelapse for benching done in 98326 millis.
+N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.439478
+Index nelements: 1000000, timelapse for loading index done in 123 millis.
+timelapse for benching done in 82244 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
+Index nelements: 1000000, timelapse for loading index done in 125 millis.
+timelapse for benching done in 81835 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
+Start benchmarking for space: N7hnswlib17InnerProductSpaceE dim: 64
+Index nelements: 1000000, timelapse for loading index done in 1249 millis.
+timelapse for benching done in 53923 millis.
+N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.007876
+Index nelements: 1000000, timelapse for loading index done in 122 millis.
+timelapse for benching done in 36785 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.007876
+Index nelements: 1000000, timelapse for loading index done in 124 millis.
+timelapse for benching done in 36375 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.010066
+*/
