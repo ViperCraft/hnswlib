@@ -135,7 +135,7 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
     const float *pEnd1 = (float*)pEnd1v;
 
     __m512 diff, v1, v2;
-    __m512 sum = _mm256_set1_ps(0);
+    __m512 sum = _mm512_set1_ps(0);
 
     while (pVect1 < pEnd1) {
         v1 = _mm512_load_ps(pVect1);
@@ -469,5 +469,14 @@ class L2SpaceI : public SpaceInterface<int> {
     }
 
     ~L2SpaceI() {}
+private:
+    static void unused() {
+#if defined(__GNUC__) && !defined(NDEBUG)
+        // GCC compiler has bug with undefined function
+        // when has been used in debug mode (-O0)
+        // this hack used only to avoid buggy behavior
+        L2SqrSIMD16Ext_ALIGNED(0, 0, 0);
+#endif
+    }
 };
 }  // namespace hnswlib
