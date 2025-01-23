@@ -47,7 +47,7 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
     return 1.f - _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
 }
 
-__attribute__((target("avx2")))
+__attribute__((target("avx,fma")))
 static float
 InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
     float *pVect1 = (float *) pVect1v;
