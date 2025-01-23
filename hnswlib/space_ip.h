@@ -118,6 +118,28 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
     return  1.f - _mm_cvtss_f32 (sum);
 }
 
+__attribute__((target("avx512f")))
+static float
+InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+    float *pVect1 = (float *) pVect1v;
+    float *pVect2 = (float *) pVect2v;
+    const float *pEnd1 = (float*)pEnd1v;
+
+    __m512 v1, v2;
+    __m512 sum = _mm512_set1_ps(0);
+
+    while (pVect1 < pEnd1) {
+        v1 = _mm512_load_ps(pVect1);
+        pVect1 += 16;
+        v2 = _mm512_loadu_ps(pVect2);
+        pVect2 += 16;
+        sum = _mm512_fmadd_ps(v1, v2, sum);
+        // TODO: to less ALU usage, so need to more parallel loads!
+    }
+
+    return 1.f - _mm512_reduce_add_ps(sum);
+}
+
 #if defined(USE_AVX)
 
 // Favor using AVX if available.
@@ -504,6 +526,15 @@ class InnerProductSpace : public SpaceInterface<float> {
     }
 
     ~InnerProductSpace() {}
+private:
+    static void unused() {
+#if defined(__GNUC__) && !defined(NDEBUG)
+        // GCC compiler has bug with undefined function
+        // when has been used in debug mode (-O0)
+        // this hack used only to avoid buggy behavior
+        InnerProductSIMD16Ext_ALIGNED(0, 0, 0);
+#endif
+    }
 };
 
 }  // namespace hnswlib
