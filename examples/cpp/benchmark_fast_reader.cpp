@@ -162,29 +162,53 @@ int main()
     free(data);
 }
 
-/* some results from single Xeon E5 Haswell 2.3Ghz with DDR3 memory*/
+/* some results from single socketed Xeon E5 Haswell 2.3Ghz with DDR3 memory, on single core */
 /*
-DB fname: bench-index-l2.hnsw not found, creating new index of 1000000 items.
-timelapse for append data done in 467515 millis.
-timelapse for saveIndex done in 204 millis.
+///////////////////////////////////////////////
+// TURBO-BOOST ENABLED
+///////////////////////////////////////////////
 Start benchmarking for space: N7hnswlib7L2SpaceE dim: 64
-Index nelements: 1000000, timelapse for loading index done in 1266 millis.
-timelapse for benching done in 98326 millis.
+Index nelements: 1000000, timelapse for loading index done in 1613 millis.
+timelapse for benching done in 119213 millis.
 N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.439478
-Index nelements: 1000000, timelapse for loading index done in 123 millis.
-timelapse for benching done in 82244 millis.
+Index nelements: 1000000, timelapse for loading index done in 186 millis.
+timelapse for benching done in 97098 millis.
 N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
-Index nelements: 1000000, timelapse for loading index done in 125 millis.
-timelapse for benching done in 81835 millis.
+Index nelements: 1000000, timelapse for loading index done in 187 millis.
+timelapse for benching done in 96167 millis.
 N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
 Start benchmarking for space: N7hnswlib17InnerProductSpaceE dim: 64
-Index nelements: 1000000, timelapse for loading index done in 1249 millis.
-timelapse for benching done in 53923 millis.
+Index nelements: 1000000, timelapse for loading index done in 1596 millis.
+timelapse for benching done in 70859 millis.
 N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.007876
-Index nelements: 1000000, timelapse for loading index done in 122 millis.
-timelapse for benching done in 36785 millis.
+Index nelements: 1000000, timelapse for loading index done in 187 millis.
+timelapse for benching done in 44463 millis.
 N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.007876
-Index nelements: 1000000, timelapse for loading index done in 124 millis.
-timelapse for benching done in 36375 millis.
+Index nelements: 1000000, timelapse for loading index done in 188 millis.
+timelapse for benching done in 43407 millis.
 N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.010066
+///////////////////////////////////////////////
+// TURBO-BOOST DISABLED
+///////////////////////////////////////////////
+Start benchmarking for space: N7hnswlib7L2SpaceE dim: 64
+Index nelements: 1000000, timelapse for loading index done in 2153 millis.
+timelapse for benching done in 135024 millis.
+N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.439478
+Index nelements: 1000000, timelapse for loading index done in 219 millis.
+timelapse for benching done in 107925 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
+Index nelements: 1000000, timelapse for loading index done in 220 millis.
+timelapse for benching done in 106709 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.439478
+Start benchmarking for space: N7hnswlib17InnerProductSpaceE dim: 64
+Index nelements: 1000000, timelapse for loading index done in 2126 millis.
+timelapse for benching done in 89351 millis.
+N7hnswlib15HierarchicalNSWIfNS_20MultiThreadedSupportEEE Recall of deserialized index: 0.007876
+Index nelements: 1000000, timelapse for loading index done in 222 millis.
+timelapse for benching done in 57674 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.007876
+Index nelements: 1000000, timelapse for loading index done in 223 millis.
+timelapse for benching done in 56119 millis.
+N7hnswlib25HierarchicalNSWFastReaderIfNS_13THPDataMapperEEE Recall of deserialized index: 0.010066
+//
 */

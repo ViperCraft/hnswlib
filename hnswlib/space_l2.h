@@ -21,7 +21,7 @@ L2Sqr(const void *pVect1v, const void *pVect2v, const void *qty_ptr) {
 
 __attribute__((target("default")))
 static float
-L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+L2SqrSIMD16_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -67,7 +67,7 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
 
 __attribute__((target("avx")))
 static float
-L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+L2SqrSIMD16AVX_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -79,16 +79,14 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
 
     while (pVect1 < pEnd1) {
         v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
         v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
         diff = _mm256_sub_ps(v1, v2);
         sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
 
-        v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
-        v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
+        v1 = _mm256_load_ps(pVect1 + 8);
+        pVect1 += 16;
+        v2 = _mm256_loadu_ps(pVect2 + 8);
+        pVect2 += 16;
         diff = _mm256_sub_ps(v1, v2);
         sum2 = _mm256_add_ps(sum2, _mm256_mul_ps(diff, diff));
     }
@@ -98,7 +96,7 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
 
 __attribute__((target("avx,fma")))
 static float
-L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+L2SqrSIMD16AVXFMA_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -110,16 +108,14 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
 
     while (pVect1 < pEnd1) {
         v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
         v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
         diff = _mm256_sub_ps(v1, v2);
         sum = _mm256_fmadd_ps(diff, diff, sum);
 
-        v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
-        v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
+        v1 = _mm256_load_ps(pVect1 + 8);
+        pVect1 += 16;
+        v2 = _mm256_loadu_ps(pVect2 + 8);
+        pVect2 += 16;
         diff = _mm256_sub_ps(v1, v2);
         sum2 = _mm256_fmadd_ps(diff, diff, sum2);
     }
@@ -129,7 +125,7 @@ L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEn
 
 __attribute__((target("avx512f")))
 static float
-L2SqrSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
+L2SqrSIMD16AVX3_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -361,7 +357,13 @@ class L2Space : public SpaceInterface<float> {
         if (dim % 16 == 0)
         {
             fstdistfunc_ = L2SqrSIMD16Ext;
-            fstdistfunc_aligned_ = L2SqrSIMD16Ext_ALIGNED;
+            fstdistfunc_aligned_ = L2SqrSIMD16_ALIGNED;
+            if( __builtin_cpu_supports("avx") )
+                fstdistfunc_aligned_ = L2SqrSIMD16AVX_ALIGNED;
+            if( __builtin_cpu_supports("fma") )
+                fstdistfunc_aligned_ = L2SqrSIMD16AVXFMA_ALIGNED;
+            if( __builtin_cpu_supports("avx512f") )
+                fstdistfunc_aligned_ = L2SqrSIMD16AVX3_ALIGNED;
         }
         else if (dim % 4 == 0)
             fstdistfunc_ = L2SqrSIMD4Ext;
@@ -395,6 +397,18 @@ class L2Space : public SpaceInterface<float> {
     }
 
     ~L2Space() {}
+private:
+    static void unused() {
+#if defined(__GNUC__) && !defined(NDEBUG)
+        // GCC compiler has bug with undefined function
+        // when has been used in debug mode (-O0)
+        // this hack used only to avoid buggy behavior
+        L2SqrSIMD16_ALIGNED(0, 0, 0);
+        L2SqrSIMD16AVX_ALIGNED(0, 0, 0);
+        L2SqrSIMD16AVXFMA_ALIGNED(0, 0, 0);
+        L2SqrSIMD16AVX3_ALIGNED(0, 0, 0);
+#endif
+    }
 };
 
 static int
@@ -469,14 +483,6 @@ class L2SpaceI : public SpaceInterface<int> {
     }
 
     ~L2SpaceI() {}
-private:
-    static void unused() {
-#if defined(__GNUC__) && !defined(NDEBUG)
-        // GCC compiler has bug with undefined function
-        // when has been used in debug mode (-O0)
-        // this hack used only to avoid buggy behavior
-        L2SqrSIMD16Ext_ALIGNED(0, 0, 0);
-#endif
-    }
 };
+
 }  // namespace hnswlib

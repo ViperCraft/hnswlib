@@ -388,35 +388,29 @@ private:
 
             candidate_set.pop();
 
-            int const *data = (int *) get_linklist0(current_node_id);
+            uint32_t const *data = (uint32_t *) get_linklist0(current_node_id);
             size_t size = getListCount((linklistsizeint*)data);
-
-#ifdef USE_SSE
-            _mm_prefetch((char *) (visited_array + *(data + 1)), _MM_HINT_T0);
-            _mm_prefetch((char *) (visited_array + *(data + 1) + 64), _MM_HINT_T0);
-            _mm_prefetch(getDataByInternalId(*(data + 1)), _MM_HINT_T0);
-            _mm_prefetch((char *) (data + 2), _MM_HINT_T0);
-#endif
+            __builtin_prefetch(visited_array + *(data + 1), 1);
+            __builtin_prefetch(visited_array + *(data + 1) + 64, 1);
+            __builtin_prefetch(getDataByInternalId(*(data + 1)), 0);
+            // prefetch list future
+            __builtin_prefetch(data + 2, 0);
 
             for (size_t j = 1; j <= size; j++) {
-                int candidate_id = *(data + j);
-#ifdef USE_SSE
-                _mm_prefetch((char *) (visited_array + *(data + j + 1)), _MM_HINT_T0);
-                _mm_prefetch(getDataByInternalId(*(data + j + 1)),
-                                _MM_HINT_T0);  ////////////
-#endif
+                uint32_t candidate_id = *(data + j);
+                __builtin_prefetch(visited_array + *(data + j + 1), 1);
+                __builtin_prefetch(getDataByInternalId(*(data + j + 1)), 0);
+
                 if( visited_map_->mark(candidate_id) ) {
                     char const* ep_data = getDataByInternalId(candidate_id);
                     dist_t dist = fstdistfunc_(query_data, ep_data, query_data_end);
 
                     bool flag_consider_candidate =
-                        top_candidates.size() < ef || lowerBound > dist;
+                        lowerBound > dist || top_candidates.size() < ef;
 
                     if (flag_consider_candidate) {
                         candidate_set.emplace(-dist, candidate_id);
-#ifdef USE_SSE
-                        _mm_prefetch(get_linklist0(candidate_set.top().second), _MM_HINT_T0);
-#endif
+                        __builtin_prefetch(get_linklist0(candidate_set.top().second), 0);
                         top_candidates.emplace(dist, candidate_id);
                         while (top_candidates.size() > ef) {
                             top_candidates.pop();

@@ -20,7 +20,7 @@ InnerProductDistance(const void *pVect1, const void *pVect2, const void *qty_ptr
 
 __attribute__((target("avx")))
 static float
-InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+InnerProductSIMD16ExtAVX_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -49,7 +49,7 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
 
 __attribute__((target("avx,fma")))
 static float
-InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+InnerProductSIMD16ExtAVXFMA_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -61,16 +61,15 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
 
     while (pVect1 < pEnd1) {
         v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
         v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
         sum = _mm256_fmadd_ps(v1, v2, sum);
 
-        v1 = _mm256_load_ps(pVect1);
-        pVect1 += 8;
-        v2 = _mm256_loadu_ps(pVect2);
-        pVect2 += 8;
+        v1 = _mm256_load_ps(pVect1 + 8);
+        v2 = _mm256_loadu_ps(pVect2 + 8);
         sum2 = _mm256_fmadd_ps(v1, v2, sum2);
+
+        pVect1 += 16;
+        pVect2 += 16;
     }
 
     return 1.f - _mm256_reduce_add_ps(_mm256_add_ps(sum, sum2));
@@ -120,7 +119,7 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
 
 __attribute__((target("avx512f")))
 static float
-InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
+InnerProductSIMD16ExtAVX3_ALIGNED(const void *pVect1v, const void *pVect2v, const void *pEnd1v ) {
     float *pVect1 = (float *) pVect1v;
     float *pVect2 = (float *) pVect2v;
     const float *pEnd1 = (float*)pEnd1v;
@@ -134,7 +133,6 @@ InnerProductSIMD16Ext_ALIGNED(const void *pVect1v, const void *pVect2v, const vo
         v2 = _mm512_loadu_ps(pVect2);
         pVect2 += 16;
         sum = _mm512_fmadd_ps(v1, v2, sum);
-        // TODO: to less ALU usage, so need to more parallel loads!
     }
 
     return 1.f - _mm512_reduce_add_ps(sum);
@@ -280,7 +278,7 @@ InnerProductSIMD16ExtAVX512(const void *pVect1v, const void *pVect2v, const void
     __m512 sum512 = _mm512_set1_ps(0);
 
     size_t loop = qty16 / 4;
-    
+
     while (loop--) {
         __m512 v1 = _mm512_loadu_ps(pVect1);
         __m512 v2 = _mm512_loadu_ps(pVect2);
@@ -468,6 +466,7 @@ class InnerProductSpace : public SpaceInterface<float> {
 
  public:
     InnerProductSpace(size_t dim) {
+        __builtin_cpu_init();
         fstdistfunc_ = InnerProductDistance;
 #if defined(USE_AVX) || defined(USE_SSE) || defined(USE_AVX512)
     #if defined(USE_AVX512)
@@ -488,11 +487,16 @@ class InnerProductSpace : public SpaceInterface<float> {
         if (AVXCapable())
             InnerProductSIMD4Ext = InnerProductSIMD4ExtAVX;
     #endif
-
         if (dim % 16 == 0)
         {
             fstdistfunc_ = InnerProductDistanceSIMD16Ext;
             fstdistfunc_aligned_ = InnerProductSIMD16Ext_ALIGNED;
+            if( __builtin_cpu_supports("avx") )
+                fstdistfunc_aligned_ = InnerProductSIMD16ExtAVX_ALIGNED;
+            if( __builtin_cpu_supports("fma") )
+                fstdistfunc_aligned_ = InnerProductSIMD16ExtAVXFMA_ALIGNED;
+            if( __builtin_cpu_supports("avx512f") )
+                fstdistfunc_aligned_ = InnerProductSIMD16ExtAVX3_ALIGNED;
         }
         else if (dim % 4 == 0)
             fstdistfunc_ = InnerProductDistanceSIMD4Ext;
@@ -533,6 +537,9 @@ private:
         // when has been used in debug mode (-O0)
         // this hack used only to avoid buggy behavior
         InnerProductSIMD16Ext_ALIGNED(0, 0, 0);
+        InnerProductSIMD16ExtAVX_ALIGNED(0, 0, 0);
+        InnerProductSIMD16ExtAVXFMA_ALIGNED(0, 0, 0);
+        InnerProductSIMD16ExtAVX3_ALIGNED(0, 0, 0);
 #endif
     }
 };
