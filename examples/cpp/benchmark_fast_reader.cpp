@@ -140,8 +140,8 @@ void test( int ntimes, int dim, float const *data, char const *fname )
     std::cout << "Start benchmarking for space: " << typeid(S).name() << " dim: " << dim << std::endl;
 
     bench_recall_from_storage<hnswlib::HierarchicalNSW<float>, false>(fname, &space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, false>(fname, &space, data, ntimes);
-    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::THPDataMapper>, true>(fname, &space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::HugePagesDataMapper>, false>(fname, &space, data, ntimes);
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::HugePagesDataMapper>, true>(fname, &space, data, ntimes);
 }
 
 int main()

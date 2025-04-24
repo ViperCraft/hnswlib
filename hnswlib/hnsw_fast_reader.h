@@ -71,37 +71,43 @@ public:
         if (mapping.data)
             ::mlock(const_cast<void*>(mapping.data), mapping.alloc_size);
     }
-};
-
-class MMapDataMapper : public MappingBase {
-public:
-    static Mapping map(const char* filename, bool need_mlock) {
+protected:
+    static ssize_t mmap4read( const char* filename, void * &mmaped )
+    {
         int fd = open(filename, O_RDONLY, 0400);
         if (fd == -1) {
-            return Mapping{};
+            return -1;
         }
 
         struct stat fd_stat;
         if (fstat(fd, &fd_stat)) {
             close(fd);
-            return Mapping{};
+            return -1;
         }
 
-        void *mmaped = mmap(0, fd_stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
+        mmaped = mmap(0, fd_stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
         close(fd);
         if (mmaped == MAP_FAILED) {
-            return Mapping{};
+            return -1;
         }
-#if defined(MADV_DONTDUMP)
-        // Exclude from a core dump those pages
-        madvise(mmaped, fd_stat.st_size, MADV_DONTDUMP);
-#endif
+
+        return fd_stat.st_size;
+    }
+};
+
+class MMapDataMapper : public MappingBase {
+public:
+    static Mapping map(const char* filename, bool need_mlock) {
+        void *mmaped;
+        size_t file_size = mmap4read(filename, mmaped);
+        if( (ssize_t)file_size < 0 )
+            return Mapping{};
 
         if (need_mlock) {
-            ::mlock(mmaped, fd_stat.st_size);
+            ::mlock(mmaped, file_size);
         }
 
-        return Mapping(mmaped, (size_t)fd_stat.st_size);
+        return Mapping(mmaped, file_size);
     }
 
     static Mapping alloc_mem( size_t sz ) {
@@ -114,36 +120,24 @@ public:
 
 class THPDataMapper : public MappingBase
 {
+protected:
     // ordinal HUGE PAGE size for most systems!
     static size_t constexpr HUGE_PAGE_SIZE = 1UL << 21; // 2M
     static size_t constexpr HUGE_PAGE_SZ_MASK = HUGE_PAGE_SIZE - 1;
 public:
     static Mapping map(const char* filename, bool need_mlock) {
-        int fd = open(filename, O_RDONLY, 0400);
-        if (fd == -1) {
+        void *mmaped;
+        size_t file_size = mmap4read(filename, mmaped);
+        if( (ssize_t)file_size < 0 )
             return Mapping{};
-        }
 
-        struct stat fd_stat;
-        if (fstat(fd, &fd_stat)) {
-            close(fd);
-            return Mapping{};
-        }
-
-        void *mmaped = mmap(0, fd_stat.st_size, PROT_READ, MAP_SHARED, fd, 0);
-        close(fd);
-        if (mmaped == MAP_FAILED) {
-            return Mapping{};
-        }
-
-
-        Mapping thp_map = alloc_mem(fd_stat.st_size);
+        Mapping thp_map = alloc_mem(file_size);
 
         // copy data
-        memcpy(thp_map.data, mmaped, fd_stat.st_size);
+        memcpy(thp_map.data, mmaped, file_size);
 
         // release file-mapping
-        unmap(Mapping(mmaped, fd_stat.st_size));
+        unmap(Mapping{mmaped, file_size});
 
         return thp_map;
     }
@@ -154,7 +148,7 @@ public:
         void *thp_map = alloc_thp_aligned(sz, alloc_sz);
         return Mapping(thp_map, sz, alloc_sz);
     }
-private:
+protected:
     static void* alloc_thp_aligned( size_t sz, size_t &out_mem_sz )
     {
         // align to the next page size
@@ -184,6 +178,54 @@ private:
         madvise(mem, out_mem_sz, MADV_HUGEPAGE);
 #endif
         return mem;
+    }
+};
+
+// universal HugePages allocator to work with annon-huge-pages in the linux
+// can allocate on the HugeTLBfs first, with low-cost fall-back to the THP
+class HugePagesDataMapper : public THPDataMapper
+{
+public:
+    static Mapping map(const char* filename, bool need_mlock) {
+        void *mmaped;
+        size_t file_size = mmap4read(filename, mmaped);
+        if( (ssize_t)file_size < 0 )
+            return Mapping{};
+
+        // try to allocate on the hugetlbfs first
+        void *htlb_mmaping = mmap(0, file_size, PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB, 0, 0);
+
+        Mapping hp_map {};
+        
+        // no way, no awail memory or not exist at all => 
+        //   falling back to the THP mode
+        if( htlb_mmaping == MAP_FAILED )
+            hp_map = THPDataMapper::alloc_mem(file_size);
+        else
+            hp_map = Mapping{htlb_mmaping, file_size};
+
+        // copy data
+        memcpy(hp_map.data, mmaped, file_size);
+
+        // release file-mapping
+        unmap(Mapping(mmaped, file_size));
+
+        return hp_map;
+    }
+
+    static Mapping alloc_mem( size_t sz )
+    {
+        void *htlb_mmaping = mmap(0, sz, PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB, 0, 0);
+
+        if( htlb_mmaping == MAP_FAILED )
+        {
+            // fall-back to THP
+            return THPDataMapper::alloc_mem(sz);
+        }
+
+        return Mapping{htlb_mmaping, sz};
     }
 };
 
@@ -314,12 +356,10 @@ public:
                 changed = false;
                 tableint *data;
 
-                data = (unsigned int *) get_linklist(ep_id, level);
-                int size = getListCount(data);
-
-                tableint *datal = data + 1;
-                for (int i = 0; i < size; i++) {
-                    tableint cand = datal[i];
+                data = (uint32_t *) get_linklist(ep_id, level);
+                for (tableint *it = data + 1, *end = it + getListCount(data); 
+                    it != end; ++it) {
+                    tableint cand = *it;
                     dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), query_data_end);
 
                     if (d < curdist) {
@@ -426,6 +466,26 @@ private:
         return top_candidates;
     }
 
+    static uint32_t scan_list( linklistsizeint *lst )
+    {
+        uint32_t *list_data = (uint32_t*)lst;
+        size_t list_sz = getListCount(lst);
+        //if( list_sz != cnt )
+        //    throw std::runtime_error("list sizes not match!");
+
+        uint32_t prev_id = 0;
+        for (size_t j = 1; j <= list_sz; j++) {
+            uint32_t candidate_id = *(list_data + j);
+
+            if( prev_id > candidate_id )
+                return 0;
+
+            prev_id = candidate_id;
+        }
+
+        return 1;
+    }
+
     void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, bool mlock) {
 
         mapping_ = MMapImpl::map(location.c_str(), mlock);
@@ -486,18 +546,60 @@ private:
         visited_map_.reset( new VisitedMap(max_elements, tmp_mapping_.data) );
         linkLists_ = (char **) ((char*)tmp_mapping_.data + max_elements * sizeof(uint16_t) );
         ef_ = 10;
+        size_t total_lnk_sz = 0, non_empty = 0;
+        uint32_t min_len_sz = 100500, max_len_sz = 0, ordered_list_cnt = 0;
         for (size_t i = 0; i < cur_element_count; i++) {
-            unsigned int linkListSize;
+            uint32_t linkListSize;
             MMapImpl::readPOD(input, linkListSize);
             if (linkListSize == 0) {
                 linkLists_[i] = nullptr;
             } else {
                 linkLists_[i] = const_cast<char*>(input);
                 input += linkListSize;
+                non_empty++;
+                total_lnk_sz += linkListSize;
+                min_len_sz = std::min(min_len_sz, linkListSize);
+                max_len_sz = std::max(max_len_sz, linkListSize);
+                ordered_list_cnt += scan_list((linklistsizeint*)linkLists_[i]);
             }
             if( input > end_addr )
                 throw std::runtime_error("file read error");
         }
+
+#ifdef COLLECT_STATS_FILE
+
+        std::cerr << "Total multi-level lists: " << cur_element_count << " full: " << non_empty 
+            << " AVG lnk_sz=" << double(total_lnk_sz) / non_empty 
+            << " min_len=" << min_len_sz
+            << " max_len=" << max_len_sz
+            << " size_links_per_element=" << size_links_per_element_
+            << " offsetData=" << offsetData
+            << " offsetLevel0=" << offsetLevel0
+            << " ordered_list_cnt=" << ordered_list_cnt
+            << std::endl;
+
+        total_lnk_sz = 0, non_empty = 0;
+        min_len_sz = 100500, max_len_sz = 0, ordered_list_cnt = 0;
+
+        for (size_t i = 0; i < cur_element_count; i++) {
+            linklistsizeint *lst = get_linklist0(i);
+            uint32_t linkListSize = getListCount(lst);
+            if( linkListSize )
+                non_empty++;
+            total_lnk_sz += linkListSize;
+            min_len_sz = std::min(min_len_sz, linkListSize);
+            max_len_sz = std::max(max_len_sz, linkListSize);
+            ordered_list_cnt += scan_list(lst);
+        }
+
+        std::cerr << "Total LEVEL0 lists: " << cur_element_count << " full: " << non_empty 
+            << " AVG lnk_sz=" << double(total_lnk_sz) / non_empty 
+            << " min_len=" << min_len_sz
+            << " max_len=" << max_len_sz
+            << " size_data_per_element=" << size_data_per_element_
+            << " ordered_list_cnt=" << ordered_list_cnt
+            << std::endl;
+#endif
     }
 
     inline linklistsizeint *get_linklist0(tableint internal_id) const {
@@ -508,8 +610,8 @@ private:
         return (linklistsizeint *) (linkLists_[internal_id] + (level - 1) * size_links_per_element_);
     }
 
-    unsigned short int getListCount(linklistsizeint * ptr) const {
-        return *((unsigned short int *)ptr);
+    static uint16_t getListCount(linklistsizeint * ptr) {
+        return *((uint16_t *)ptr);
     }
 
 private:
