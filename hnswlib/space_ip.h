@@ -483,6 +483,9 @@ class InnerProductSpace : public SpaceInterface<float> {
             InnerProductDistanceSIMD16Ext = InnerProductDistanceSIMD16ExtAVX;
         }
     #endif
+    #if not defined(USE_AVX512)
+    (void)AVX512Capable;
+    #endif
     #if defined(USE_AVX)
         if (AVXCapable())
             InnerProductSIMD4Ext = InnerProductSIMD4ExtAVX;

@@ -1,6 +1,12 @@
 #include "../../hnswlib/hnsw_fast_reader.h"
 #include <chrono>
 
+#define ENABLE_MT_TEST
+
+#ifdef ENABLE_MT_TEST
+#   include <omp.h>
+#endif
+
 static int const dim = 64;
 static int const max_elements = 1000000;
 static int const M = 16;
@@ -57,8 +63,8 @@ static bool search( float const *vec, T *api, hnswlib::labeltype i )
     return result.top().second == i;
 }
 
-template<bool filter_api, typename T>
-static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T> *api,
+template<bool filter_api, typename T, typename CTX>
+static bool search( float const *vec, hnswlib::HierarchicalNSWFastReader<float, T, CTX> *api,
     hnswlib::labeltype i )
 {
     if( !filter_api )
@@ -109,6 +115,7 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
     float avg_recall = 0;
     {
         Timelapse tm("benching");
+        #pragma omp parallel for reduction(+:avg_recall)
         for( int t = 0; t < ntimes; ++t )
         {
             float correct = 0;
@@ -120,6 +127,7 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
 
             avg_recall += recall;
         }
+        #pragma omp barrier
     }
     std::cout << typeid(T).name() << " Recall of deserialized index: "
         << avg_recall / ntimes << std::endl;
@@ -130,6 +138,7 @@ static void bench_recall_from_storage(char const *fname, S *space, float const *
     delete alg_hnsw;
 }
 
+struct MyCtxLocalName {};
 
 template<typename S>
 void test( int ntimes, int dim, float const *data, char const *fname )
@@ -139,9 +148,20 @@ void test( int ntimes, int dim, float const *data, char const *fname )
 
     std::cout << "Start benchmarking for space: " << typeid(S).name() << " dim: " << dim << std::endl;
 
+#ifdef ENABLE_MT_TEST
+    omp_set_num_threads(1);
+#endif
+
     bench_recall_from_storage<hnswlib::HierarchicalNSW<float>, false>(fname, &space, data, ntimes);
     bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::HugePagesDataMapper>, false>(fname, &space, data, ntimes);
     bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, hnswlib::HugePagesDataMapper>, true>(fname, &space, data, ntimes);
+
+#ifdef ENABLE_MT_TEST
+    omp_set_num_threads(ntimes);
+    using MTCtx = hnswlib::MTContextHolder<hnswlib::HugePagesDataMapper, MyCtxLocalName>;
+    bench_recall_from_storage<hnswlib::HierarchicalNSWFastReader<float, 
+        hnswlib::HugePagesDataMapper, MTCtx>, true>(fname, &space, data, ntimes);
+#endif
 }
 
 int main()
@@ -156,8 +176,8 @@ int main()
     }
 
 
-    test<hnswlib::L2Space>(3, dim, data, INDEX_NAMES[0]);
-    test<hnswlib::InnerProductSpace>(3, dim, data, INDEX_NAMES[1]);
+    test<hnswlib::L2Space>(4, dim, data, INDEX_NAMES[0]);
+    test<hnswlib::InnerProductSpace>(4, dim, data, INDEX_NAMES[1]);
 
     free(data);
 }

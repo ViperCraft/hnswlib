@@ -198,7 +198,7 @@ public:
 
         Mapping hp_map {};
         
-        // no way, no awail memory or not exist at all => 
+        // no way, no avail memory or not exist at all => 
         //   falling back to the THP mode
         if( htlb_mmaping == MAP_FAILED )
             hp_map = THPDataMapper::alloc_mem(file_size);
@@ -269,12 +269,84 @@ class VisitedMapT {
     ~VisitedMapT() {}
 };
 
+// this need to separate shared storage and temporary data
+// for example under multi-threaded environment we need to 
+// separate temporary contexts
+template<typename MMapImpl>
+class DefaultContextHolder
+{
+public:
+    void alloc( size_t max_elements )
+    {
+        mapping_ = MMapImpl::alloc_mem( max_elements * sizeof(uint16_t) );
+        // TODO: place visited_map in the same VMA!
+        visited_map_.reset( new VisitedMap(max_elements, mapping_.data) );
+    }
+    uint16_t const* scan_start( uint32_t ep_id, uint32_t )
+    {
+        visited_map_->reset();
+        uint16_t const *visited_array = visited_map_->arr;
+
+        visited_map_->set(ep_id);
+
+        return visited_array;
+    }
+    bool mark( uint32_t pos )
+    {
+        return visited_map_->mark(pos);
+    }
+    ~DefaultContextHolder()
+    {
+        MMapImpl::unmap(mapping_);
+    }
+    bool is_initialized() const
+    {
+        return visited_map_ != nullptr;
+    }
+private:
+    using VisitedMap = VisitedMapT<uint16_t>;
+    std::unique_ptr<VisitedMap> visited_map_;
+    DataMapping mapping_;
+};
+
+// default multi-threaded implementation with lazy init
+template<typename MMapImpl, typename GlobalName>
+class MTContextHolder
+{
+    using ImplT = DefaultContextHolder<MMapImpl>;
+public:
+    void alloc( size_t max_elements )
+    {
+        // lazy init, do nothing here
+    }
+    uint16_t const* scan_start( uint32_t ep_id, uint32_t max_elements )
+    {
+        if( !impl_.is_initialized() )
+        {
+            impl_.alloc(max_elements);
+        }
+
+        return impl_.scan_start(ep_id, max_elements);
+    }
+    bool mark( uint32_t pos )
+    {
+        return impl_.mark(pos);
+    }
+private:
+    static thread_local ImplT impl_;
+};
+
+template<typename MMapImpl, typename GlobalName>
+thread_local typename MTContextHolder<MMapImpl, GlobalName>::ImplT 
+MTContextHolder<MMapImpl, GlobalName>::impl_;
+
 
 // reads filecontent directly from disk-cache w/o moving to the anon memory and allocation
 // reading and search only, so temporary structures for quick expand also omitted
 // to get maximum speed, can be used with HierarchicalNSW class
 // NOTE: this code is completely based on code from original HierarchicalNSW class!
-template<typename dist_t, typename MMapImpl = MMapDataMapper>
+template<typename dist_t, typename MMapImpl = MMapDataMapper, 
+    typename CtxHolder = DefaultContextHolder<MMapImpl> >
 class HierarchicalNSWFastReader
 {
 public:
@@ -299,7 +371,6 @@ public:
 
     ~HierarchicalNSWFastReader() {
         MMapImpl::unmap(mapping_);
-        MMapImpl::unmap(tmp_mapping_);
     }
 
 
@@ -415,10 +486,7 @@ private:
         top_candidates.emplace(lowerBound, ep_id);
         candidate_set.emplace(-lowerBound, ep_id);
 
-        visited_map_->reset();
-        auto const *visited_array = visited_map_->arr;
-
-        visited_map_->set(ep_id);
+        auto const *visited_array = ctx_.scan_start(ep_id, max_elements_);
 
         while (!candidate_set.empty()) {
             auto [candidate_dist, current_node_id] = candidate_set.top();
@@ -441,7 +509,7 @@ private:
                 __builtin_prefetch(visited_array + *(data + j + 1), 1);
                 __builtin_prefetch(getDataByInternalId(*(data + j + 1)), 0);
 
-                if( visited_map_->mark(candidate_id) ) {
+                if( ctx_.mark(candidate_id) ) {
                     char const* ep_data = getDataByInternalId(candidate_id);
                     dist_t dist = fstdistfunc_(query_data, ep_data, query_data_end);
 
@@ -537,14 +605,11 @@ private:
         size_links_per_element_ = maxM_ * sizeof(tableint) + sizeof(linklistsizeint);
 
         // alloc mem for temporary structures
-        // 1. visited list
-        // 2. short-path for linked-lists start addr
+        ctx_.alloc(max_elements);
 
-        tmp_mapping_ = MMapImpl::alloc_mem( max_elements * sizeof(uint16_t)
-            + sizeof(void *) * max_elements);
+        tmp_mapping_ = MMapImpl::alloc_mem(sizeof(void *) * max_elements);
 
-        visited_map_.reset( new VisitedMap(max_elements, tmp_mapping_.data) );
-        linkLists_ = (char **) ((char*)tmp_mapping_.data + max_elements * sizeof(uint16_t) );
+        linkLists_ = (char **)tmp_mapping_.data;
         ef_ = 10;
         size_t total_lnk_sz = 0, non_empty = 0;
         uint32_t min_len_sz = 100500, max_len_sz = 0, ordered_list_cnt = 0;
@@ -615,8 +680,6 @@ private:
     }
 
 private:
-    using VisitedMap = VisitedMapT<uint16_t>;
-
     uint32_t size_data_per_element_{0};
     uint32_t size_links_per_element_{0};
 
@@ -626,12 +689,12 @@ private:
 
     DISTFUNC<dist_t> fstdistfunc_;
 
-    std::unique_ptr<VisitedMap> visited_map_;
-
     uint32_t ef_{ 0 };
     tableint enterpoint_node_{0};
     int maxlevel_{0};
     uint32_t max_elements_{0};
+
+    mutable CtxHolder ctx_;
 
     DataMapping mapping_, tmp_mapping_;
 };

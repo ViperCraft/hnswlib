@@ -353,6 +353,9 @@ class L2Space : public SpaceInterface<float> {
         if (AVXCapable())
             L2SqrSIMD16Ext = L2SqrSIMD16ExtAVX;
     #endif
+    #if not defined(USE_AVX512)
+    (void)AVX512Capable;
+    #endif
 
         if (dim % 16 == 0)
         {
