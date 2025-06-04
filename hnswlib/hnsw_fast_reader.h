@@ -48,13 +48,13 @@ inline void* aligned_malloc( size_t sz, size_t alignment = 16 )
 
 class MappingBase
 {
-protected:
+public:
     using Mapping = DataMapping;
+    enum : uint32_t { DEFAULTS = 0x0, MLOCK_ENABLED = 0x1, };
     static constexpr size_t align_size( size_t sz, size_t block_siz )
     {
         return (sz + block_siz - 1) & ~(block_siz - 1);
     }
-public:
     static void unmap(const Mapping & mapping) {
         if (mapping.data)
             ::munmap(const_cast<void*>(mapping.data), mapping.alloc_size);
@@ -97,13 +97,13 @@ protected:
 
 class MMapDataMapper : public MappingBase {
 public:
-    static Mapping map(const char* filename, bool need_mlock) {
+    static Mapping map(const char* filename, uint32_t mm_params) {
         void *mmaped;
         size_t file_size = mmap4read(filename, mmaped);
         if( (ssize_t)file_size < 0 )
             return Mapping{};
 
-        if (need_mlock) {
+        if (mm_params & MLOCK_ENABLED) {
             ::mlock(mmaped, file_size);
         }
 
@@ -125,7 +125,7 @@ protected:
     static size_t constexpr HUGE_PAGE_SIZE = 1UL << 21; // 2M
     static size_t constexpr HUGE_PAGE_SZ_MASK = HUGE_PAGE_SIZE - 1;
 public:
-    static Mapping map(const char* filename, bool need_mlock) {
+    static Mapping map(const char* filename, uint32_t mm_params) {
         void *mmaped;
         size_t file_size = mmap4read(filename, mmaped);
         if( (ssize_t)file_size < 0 )
@@ -186,7 +186,7 @@ protected:
 class HugePagesDataMapper : public THPDataMapper
 {
 public:
-    static Mapping map(const char* filename, bool need_mlock) {
+    static Mapping map(const char* filename, uint32_t mm_params) {
         void *mmaped;
         size_t file_size = mmap4read(filename, mmaped);
         if( (ssize_t)file_size < 0 )
@@ -364,8 +364,8 @@ public:
 
     HierarchicalNSWFastReader(
         SpaceInterface<dist_t> *s,
-        const std::string &location, bool mlock = false) {
-        loadIndex(location, s, mlock);
+        const std::string &location, uint32_t mm_params = MMapImpl::DEFAULTS ) {
+        loadIndex(location, s, mm_params);
     }
 
 
@@ -419,7 +419,7 @@ public:
         size_t max_ef, pq_top_candidates_t &top_candidates) const {
 
         tableint ep_id = enterpoint_node_;
-        dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), query_data_end);
+        dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(ep_id), query_data_end);
 
         for (int level = maxlevel_; level > 0; level--) {
             bool changed = true;
@@ -554,9 +554,9 @@ private:
         return 1;
     }
 
-    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, bool mlock) {
+    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, uint32_t mm_params) {
 
-        mapping_ = MMapImpl::map(location.c_str(), mlock);
+        mapping_ = MMapImpl::map(location.c_str(), mm_params);
 
         if( nullptr == mapping_.data )
             throw std::runtime_error("failed to mmap index file: " + location);

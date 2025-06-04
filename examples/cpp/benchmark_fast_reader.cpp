@@ -99,6 +99,7 @@ static void debug_print( hnswlib::HierarchicalNSWFastReader<float, T> *api )
     //std::cout << "get_avg_candidate_set_size()=" << api->get_avg_candidate_set_size() << std::endl;
 }
 
+
 template<typename T, bool filter_api, typename S>
 static void bench_recall_from_storage(char const *fname, S *space, float const *data, int ntimes )
 {
