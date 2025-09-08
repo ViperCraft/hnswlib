@@ -278,7 +278,9 @@ class DefaultContextHolder
 public:
     void alloc( size_t max_elements )
     {
+        MMapImpl::unmap(mapping_);
         mapping_ = MMapImpl::alloc_mem( max_elements * sizeof(uint16_t) );
+
         // TODO: place visited_map in the same VMA!
         visited_map_.reset( new VisitedMap(max_elements, mapping_.data) );
     }
@@ -299,9 +301,9 @@ public:
     {
         MMapImpl::unmap(mapping_);
     }
-    bool is_initialized() const
+    bool has_enough_size(uint32_t max_elements) const
     {
-        return visited_map_ != nullptr;
+        return visited_map_ && visited_map_->sz >= max_elements;
     }
 private:
     using VisitedMap = VisitedMapT<uint16_t>;
@@ -321,7 +323,7 @@ public:
     }
     uint16_t const* scan_start( uint32_t ep_id, uint32_t max_elements )
     {
-        if( !impl_.is_initialized() )
+        if( !impl_.has_enough_size(max_elements) )
         {
             impl_.alloc(max_elements);
         }
